@@ -514,11 +514,13 @@ class BaseAgent(ABC):
     Handles Q-table init, action selection, hyperparameters
     """
     def __init__(self, num_states: int, num_actions: int, lr: float = 0.1, gamma: float = 0.99, epsilon: float = 0.1):
-        self.n_states = num_states
-        self.n_actions = num_actions
+        self.num_states = num_states
+        self.num_actions = num_actions
         self.lr = lr            # learning rate (alpha)
         self.gamma = gamma      # discount factor
         self.epsilon = epsilon  # exploration rate
+
+        self.allowed_actions = list(range(self.num_actions))    # for specific env, if provided
 
         # init Q-table
         # random init # todo: consider other inits optoins
@@ -527,22 +529,35 @@ class BaseAgent(ABC):
         #self.q_table = np.ones((num_states, num_actions))
         self.q_table = np.zeros((num_states, num_actions))
 
-    def choose_action(self, state_idx: int, force_greedy: bool = False) -> int:
+    def choose_action(self, state_idx: int, force_greedy: bool = False, allowed_actions: Optional[List[int]] = None) -> int:
         """
         Epsilon-greedy action selection
         :param state_idx: current state index
         :param force_greedy: controls exploration (ignores epsilon) for inference/testing
         :return : selected action index
         """
+        
+        # remove disabled actions if provided
+        if allowed_actions is None:
+            actions = list(range(self.num_actions))
+        else:
+            actions = np.array(allowed_actions, dtype=int)
+        
+
         if not force_greedy and np.random.uniform(0, 1) < self.epsilon:
             # explore:
-            selected_action = np.random.randint(0, self.n_actions)
+            selected_action = np.random.choice(actions)
             return int(selected_action)
         else:
             # exploit:
-            values = self.q_table[state_idx]                        # get Q-table row for current state
-            best_actions = np.flatnonzero(values == values.max())   # get all actions with max Q-value (1 or more)
-            selected_action = np.random.choice(best_actions)        # break ties randomly (if multiple best)
+            qt = self.q_table[state_idx, actions]                       # get Q-table row for current state
+            best_actions = np.flatnonzero(qt == qt.max())               # get all actions with max Q-value (1 or more)
+            selected_action = np.random.choice(actions[best_actions])   # break ties randomly (if multiple best)
+            
+            # DEBUG: # todo
+            if allowed_actions is not None:
+                assert selected_action in actions
+
             return int(selected_action)
 
     @abstractmethod
@@ -567,7 +582,15 @@ class QLearningAgent(BaseAgent):
         Q-Learning update (off-policy):
         Q(s,a) <- Q(s,a) + alpha * [reward + gamma * max(Q(s',a')) - Q(s,a)]
         """
-        max_next_q = np.max(self.q_table[next_state]) if not done else 0.0
+
+        if done:
+            max_next_q = 0.0
+        else:
+            if not self.allowed_actions:
+                max_next_q = np.max(self.q_table[next_state])
+            else:
+                max_next_q = np.max(self.q_table[next_state, self.allowed_actions])
+
         td_target = reward + self.gamma * max_next_q
 
         current_q = self.q_table[state][action]
@@ -656,8 +679,14 @@ class ExperimentRunner:
         self.raw_env = env_class(render_mode="rgb_array", max_steps=max_steps)
         self.env = KeyFlatObsWrapper(self.raw_env)
 
+        # definitions specific to key-door env
+        is_key_door_env = False
+        self.allowed_actions = None
+        if env_class == RandomKeyMEnv_10:
+            is_key_door_env = True
+            self.allowed_actions = [0, 1, 2, 3, 5]  # disable actions: 'drop' (4), 'done' (6)
+
         # state handler
-        is_key_door_env = (env_class == RandomKeyMEnv_10)       # true if env2, false if env1
         self.state_handler = StateHandler(env=self.env, use_key_door=is_key_door_env)
 
         # create new agent from scrtch
@@ -666,6 +695,7 @@ class ExperimentRunner:
             num_states=self.state_handler.num_states,
             **agent_kwargs
         )
+        self.agent.allowed_actions = self.allowed_actions
 
     def run(self) -> Tuple[List[float], List[float], List[int], List[int]]:
         """
@@ -677,7 +707,18 @@ class ExperimentRunner:
         steps_history = []
         success_history = []
 
+        # DEBUG: action counts # todo
+        action_counts_window = []
+        got_key_hist = []
+        opened_door_hist = []
+
+
         for episode in range(self.num_episodes):
+        
+            # DEBUG: print action space size # todo
+            if episode == 0:
+                print("env.action_space.n =", self.env.action_space.n)
+
             self.env.reset()
             state = self.state_handler.get_state_index()
             
@@ -692,18 +733,24 @@ class ExperimentRunner:
             steps = 0               # step counter
             success = 0             # success metric
 
+            # DEBUG: action counts # todo
+            action_counts = np.zeros(self.env.action_space.n, dtype=int)
+
             # track state changes for reward shaping
-            prev_has_key = False
-            prev_door_open = False
+            got_key = False
+            opened_door = False
 
             # for SARSA - needs actoin before loop
             action = 0
             if isinstance(self.agent, SARSAAgent):
-                action = self.agent.choose_action(state)
+                action = self.agent.choose_action(state_idx=state, allowed_actions=self.allowed_actions)
             
             while not done and not truncated:
                 if not isinstance(self.agent, SARSAAgent):
-                    action = self.agent.choose_action(state)
+                    action = self.agent.choose_action(state_idx=state, allowed_actions=self.allowed_actions)
+                
+                # DEBUG: count actions # todo
+                action_counts[action] += 1
 
                 # step:
                 obs, raw_reward, done, truncated, _ = self.env.step(action)
@@ -717,11 +764,11 @@ class ExperimentRunner:
                     training_reward = self.reward_shaping_func(
                         self.env,
                         raw_reward, 
-                        prev_has_key,
-                        prev_door_open, 
+                        got_key,
+                        opened_door, 
                     )
-                prev_has_key = self.env.is_carrying_key()
-                prev_door_open = self.env.is_door_open()
+                got_key = got_key or self.env.is_carrying_key()
+                opened_door = opened_door or self.env.is_door_open()
 
                 # update:
                 # **use training reward
@@ -734,7 +781,7 @@ class ExperimentRunner:
                         done=terminal
                     )
                 elif isinstance(self.agent, SARSAAgent):
-                    next_action = 0 if terminal else self.agent.choose_action(next_state)
+                    next_action = 0 if terminal else self.agent.choose_action(state_idx=next_state, allowed_actions=self.allowed_actions)
                     self.agent.update(
                         state=state,
                         action=action,
@@ -776,6 +823,14 @@ class ExperimentRunner:
             steps_history.append(steps)
             success_history.append(success)
 
+            # DEBUG: action counts # todo
+            action_counts_window.append(action_counts)
+            if len(action_counts_window) > 100:
+                action_counts_window.pop(0)
+            got_key_hist.append(int(got_key))
+            opened_door_hist.append(int(opened_door))
+
+
             if (episode + 1) % 100 == 0:
                 avg_reward_raw = np.mean(raw_rewards_history[-100:])
                 avg_reward_shaped = np.mean(shaped_rewards_history[-100:])
@@ -784,6 +839,19 @@ class ExperimentRunner:
                       f"Avg RAW Reward (last 100 ep.): {avg_reward_raw:.2f} | "
                       f"Avg SHAPED Reward (last 100 ep.): {avg_reward_shaped:.2f} | "
                       f"success={success_rate:.1f}%")
+                
+                # DEBUG: print action counts # todo
+                avg_counts = np.mean(np.stack(action_counts_window, axis=0), axis=0)
+                # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
+                # (your key env uses 6 actions: 0..5, so 'done' isn't present)
+                names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
+                for i, name in enumerate(names[:self.env.action_space.n]):
+                    print(f"  avg {name}: {avg_counts[i]:.1f}")
+                print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
+                print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
+                print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
+                print(f"  door_open% (last 100): {100*np.mean(opened_door_hist[-100:]):.1f}%")
+
 
         return raw_rewards_history, shaped_rewards_history, steps_history, success_history
 
@@ -796,7 +864,7 @@ class ExperimentRunner:
 # ==========================================
 
 # define reward shaping function to pass to exp runner
-def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , prev_has_key: bool, prev_door_open: bool) -> float:
+def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_given: bool, door_bonus_given: bool) -> float:
     """
     Reward shaping to guide agent in env 2
     """
@@ -806,11 +874,11 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , prev_has_key
         reward -= 0.1
 
     # bonus - picked up key
-    if env.is_carrying_key() and not prev_has_key:
+    if env.is_carrying_key() and not key_bonus_given:
         reward += 50.0 
     
     # bonus - opened door
-    if env.is_door_open() and not prev_door_open:
+    if env.is_door_open() and not door_bonus_given:
         reward += 50.0
         
     return reward
