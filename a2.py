@@ -539,7 +539,7 @@ class BaseAgent(ABC):
         
         # remove disabled actions if provided
         if allowed_actions is None:
-            actions = list(range(self.num_actions))
+            actions = np.array(list(range(self.num_actions)), dtype=int)
         else:
             actions = np.array(allowed_actions, dtype=int)
         
@@ -547,7 +547,6 @@ class BaseAgent(ABC):
         if not force_greedy and np.random.uniform(0, 1) < self.epsilon:
             # explore:
             selected_action = np.random.choice(actions)
-            return int(selected_action)
         else:
             # exploit:
             qt = self.q_table[state_idx, actions]                       # get Q-table row for current state
@@ -558,7 +557,7 @@ class BaseAgent(ABC):
             if allowed_actions is not None:
                 assert selected_action in actions
 
-            return int(selected_action)
+        return int(selected_action)
 
     @abstractmethod
     def update(self, *args) -> None:
@@ -872,6 +871,10 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
     # penalty - step cost
     if reward == 0:
         reward -= 0.1
+    
+    # todo
+    if reward == 1:
+        reward = 10.0
 
     # bonus - picked up key
     if env.is_carrying_key() and not key_bonus_given:
