@@ -423,6 +423,40 @@ class KeyFlatObsWrapper(gym.ObservationWrapper):
 
         return current_map
 
+    def is_front_blocked(self) -> bool:
+        """
+        Checks if tile directly in front of agent is a wall
+        """
+        # get env, verify reset called
+        env = self.unwrapped
+        if env.agent_pos is None or env.agent_dir is None:
+            return True
+        
+        # get position of tile in front
+        tile_x, tile_y = env.front_pos
+
+        # check grid bounds
+        if not ((0 <= tile_x < env.width) and (0 <= tile_y < env.height)):
+            return True  # out of bounds, treated as blocked
+
+        # get cell in front
+        cell = env.grid.get(tile_x, tile_y)
+        
+        # empty cell, i.e. not blocked
+        if cell is None:
+            return False
+        
+        # check walls
+        if isinstance(cell, Wall):
+            return True
+        
+        # check door (closed door is blocking)
+        if isinstance(cell, Door):
+            return not cell.is_open
+        
+        # no other obstacles
+        return False       
+
 
 # ==========================================
 # State Representation Component
@@ -432,7 +466,8 @@ class StateHandler:
     Handles conversion of MiniGrid observations to discrete (integer) states
     Mapping: (AgentX, AgentY, Direction, HoldingStatus) -> unique int
     """
-    NUM_DIRECTIONS = 4  # possible agent directions 0-3
+    NUM_DIRECTIONS = 4      # possible agent directions 0-3
+    NUM_BLOCKED_STATES = 2  # tile in front blocked/not
 
 
     def __init__(self, env: KeyFlatObsWrapper, use_key_door: bool = False):
@@ -444,16 +479,18 @@ class StateHandler:
 
         # use relative positions WRT targets (key/door/goal)
         # relative vector = (target-agent) , in the range [-width, +width] i.e.
-        self.range_dimension = self.width * 2
+        self.relative_position_range = self.width * 2
 
-        self.spatial_dimensions = (self.range_dimension * self.range_dimension) * self.NUM_DIRECTIONS
+        # todo: ensure references to num_spatial_states arent broken
+        self.num_spatial_states = (self.relative_position_range * self.relative_position_range)
+        self.num_spatial_states *= (self.NUM_DIRECTIONS * self.NUM_BLOCKED_STATES)
 
         # Env 2 has 3 game phases: 
         #   a) no key -> target is key
         #   b) have key, door closed -> target is door
         #   c) door open -> target is goal
         self.num_phases = 3 if self.use_key_door else 1
-        self.num_states = self.spatial_dimensions * self.num_phases
+        self.num_states = self.num_spatial_states * self.num_phases
 
     def get_state_index(self) -> int:
         """
@@ -466,6 +503,7 @@ class StateHandler:
         # get agent position + direction
         agent_position = self.env.get_position()
         agent_direction = self.env.get_direction()
+        is_front_blocked = int(self.env.is_front_blocked()) # todo: move def + update call
 
         # determine phase + target position:
         phase_offset = 0
@@ -482,12 +520,12 @@ class StateHandler:
 
             # phase 1: have key, door closed -> target = door
             elif has_key and not is_door_open:
-                phase_offset = self.spatial_dimensions  
+                phase_offset = self.num_spatial_states  
                 target_position = self.env.get_door_pos()
             
             # phase 2: door open -> target = goal
             else:
-                phase_offset = 2 * self.spatial_dimensions  
+                phase_offset = 2 * self.num_spatial_states  
                 target_position = self.env.get_goal_pos()
         
         # calculate relative vector (target - agent)
@@ -498,10 +536,17 @@ class StateHandler:
         dx += self.width
         dy += self.height
 
+        # verify vector within grid bounds
+        dx = max(0, min(dx, self.relative_position_range - 1))
+        dy = max(0, min(dy, self.relative_position_range - 1))
+
         # flatten to single int index
-        idx = (dx * self.range_dimension + dy) * self.NUM_DIRECTIONS
-        idx += agent_direction
-        idx += phase_offset
+        idx = (dx * self.relative_position_range + dy) 
+        idx *= self.NUM_DIRECTIONS      # 4 directions
+        idx += agent_direction          # offset for agent direction
+        idx *= self.NUM_BLOCKED_STATES  # 2 front block states
+        idx += is_front_blocked         # offset for front block state
+        idx += phase_offset             # offset for game phase
         return idx
             
 
@@ -713,6 +758,9 @@ class ExperimentRunner:
 
 
         for episode in range(self.num_episodes):
+
+            # DEBUG: usage of front block state # todo
+            front_block_history = []
         
             # DEBUG: print action space size # todo
             if episode == 0:
@@ -747,6 +795,9 @@ class ExperimentRunner:
             while not done and not truncated:
                 if not isinstance(self.agent, SARSAAgent):
                     action = self.agent.choose_action(state_idx=state, allowed_actions=self.allowed_actions)
+                
+                # DEBUG: front block state # todo
+                front_block_history.append(int(self.env.is_front_blocked()))
                 
                 # DEBUG: count actions # todo
                 action_counts[action] += 1
@@ -839,13 +890,15 @@ class ExperimentRunner:
                       f"Avg SHAPED Reward (last 100 ep.): {avg_reward_shaped:.2f} | "
                       f"success={success_rate:.1f}%")
                 
+                # DEBUG: front block state # todo
+                print(f"  front_blocked% (current episode): {100*np.mean(front_block_history):.1f}%")
                 # DEBUG: print action counts # todo
                 avg_counts = np.mean(np.stack(action_counts_window, axis=0), axis=0)
                 # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
                 # (your key env uses 6 actions: 0..5, so 'done' isn't present)
                 names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
-                for i, name in enumerate(names[:self.env.action_space.n]):
-                    print(f"  avg {name}: {avg_counts[i]:.1f}")
+                # for i, name in enumerate(names[:self.env.action_space.n]):
+                #     print(f"  avg {name}: {avg_counts[i]:.1f}")
                 print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
                 print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
                 print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
@@ -856,7 +909,6 @@ class ExperimentRunner:
 
     def close(self) -> None:
         self.env.close()
-
 
 # ==========================================
 # TRAINING & EVALUATION
