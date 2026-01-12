@@ -728,6 +728,9 @@ class ExperimentRunner:
     """
     Manages training loop, logging, env interaction
     """
+    EPSILON_DECAY = 0.999
+    MIN_EPSILON = 0.01
+
     # todo: type hints
     def __init__(self, env_class: Any, agent_class: Any, num_episodes: int = 1000, max_steps: int = 100,
                  reward_shaping_func: Optional[Callable] = None, **agent_kwargs):
@@ -758,102 +761,190 @@ class ExperimentRunner:
         )
         self.agent.allowed_actions = self.allowed_actions
 
-    def run(self) -> Tuple[List[float], List[float], List[int], List[int]]:
+    def train(self) -> Tuple[List[float], List[float], List[int], List[int]]:
         """
-        Main training loop over game episodes
-        :return : rewards history, steps history
+        Wrapper for running training loop
+        :return : both rewards histories, steps + success histories
         """
+        return self._run(
+            num_episodes=self.num_episodes, 
+            training=True, 
+            use_shaping=True, 
+            force_greedy=False
+        )
+
+    def eval(self, num_episodes: int = 200, use_shaping: bool = False) -> Dict[str, float]:
+        """
+        Wrapper for running evaluation loop
+        - fixed number of episodes
+        :param num_episodes: number of episodes to run
+        :param use_shaping: use reward shaping?
+        :return : diagnostics summary object
+        """
+
+        # manually disable exploration
+        old_epsilon = getattr(self.agent, "epsilon", None)
+        if old_epsilon is not None:
+            self.agent.epsilon = 0.0
+        
+        # run:
+        raw_rewards_history, shaped_rewards_history, steps_history, success_history = self._run(
+            num_episodes=num_episodes, 
+            training=False,
+            use_shaping=use_shaping,
+            force_greedy=True
+        )
+
+        if old_epsilon is not None:
+            self.agent.epsilon = old_epsilon
+        
+        return {
+            "eval_success_rate": float(np.mean(success_history)),
+            "eval_avg_steps": float(np.mean(steps_history)),
+            "eval_avg_raw_reward": float(np.mean(raw_rewards_history)),
+            "eval_avg_shaped_reward": float(np.mean(shaped_rewards_history)),
+        }
+
+    def _run(self, num_episodes: int, training: bool, use_shaping: bool, force_greedy: bool) -> Tuple[List[float], List[float], List[int], List[int]]:
+        """
+        Core loop for training/eval
+        :param num_episodes: number of episodes to run
+        :param training: is training mode?
+        :param use_shaping: use reward shaping?
+        :param force_greedy: force greedy action selection (no exploration)
+        :return : rewards histories, steps + success histories
+        """
+
         raw_rewards_history = []
         shaped_rewards_history = []
         steps_history = []
         success_history = []
 
-        # DEBUG: action counts # todo
-        action_counts_window = []
-        got_key_hist = []
-        opened_door_hist = []
-        end_phase_hist = []   # 0/1/2
-        end_side_hist = []    # 0=left, 1=right, 2=on partition/door column, -1=unknown
+        for episode in range(num_episodes):
+            episode_diagnostics = self._run_episode(
+                training=training, 
+                use_shaping=use_shaping,
+                force_greedy=force_greedy
+            )
 
-        for episode in range(self.num_episodes):
+            # log episode diagnostics
+            raw_rewards_history.append(episode_diagnostics["total_raw_reward"])
+            shaped_rewards_history.append(episode_diagnostics["total_shaped_reward"])
+            steps_history.append(episode_diagnostics["steps"])
+            success_history.append(episode_diagnostics["success"])
 
-            # DEBUG: usage of front block state # todo
-            front_block_history = []
+            # decay epsilon (if training)
+            if training and hasattr(self.agent, "epsilon"):
+                new_epsilon = self.agent.epsilon * self.EPSILON_DECAY
+                self.agent.epsilon = max(new_epsilon, self.MIN_EPSILON)
+            
+            # print diagnostics (100 episode batches)
+            if training and (episode + 1) % 100 == 0:
+                avg_reward_raw = np.mean(raw_rewards_history[-100:])
+                avg_reward_shaped = np.mean(shaped_rewards_history[-100:])
+                success_rate = float(np.mean(success_history[-100:])) * 100.0
+                print(f"\n[{self.agent.name}] Episode {episode + 1}/{self.num_episodes} | "
+                      f"Avg RAW Reward: {avg_reward_raw:.2f} | "
+                      f"Avg SHAPED Reward: {avg_reward_shaped:.2f} | "
+                      f"success={success_rate:.1f}%")
+                
+                # # DEBUG: end phase + side # todo
+                # if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
+                #     self._print_episode_end_diagnostics(end_phase_hist, end_side_hist, window=100)
+                # # DEBUG: front block state # todo
+                # print(f"  front_blocked% (current episode): {100*np.mean(front_block_history):.1f}%")
+                # # DEBUG: print action counts # todo
+                # avg_counts = np.mean(np.stack(action_counts_window, axis=0), axis=0)
+                # # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
+                # # (your key env uses 6 actions: 0..5, so 'done' isn't present)
+                # names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
+                # avg_counts_str = ", ".join(f"{names[i]}={avg_counts[i]:.1f}" for i in range(self.env.action_space.n))
+                # print(f"  avg_action_counts (last 100): {avg_counts_str}")
+                # print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
+                # print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
+                # print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
+                # print(f"  door_open% (last 100): {100*np.mean(opened_door_hist[-100:]):.1f}%")
+
+        return raw_rewards_history, shaped_rewards_history, steps_history, success_history
+    
+    def _run_episode(self, training: bool, use_shaping: bool, force_greedy: bool) -> Dict[str, Any]:
+        """
+        Runs single episode in the environment
+        :param training: is training mode?
+        :param use_shaping: use reward shaping?
+        :param force_greedy: force greedy action selection (no exploration)
+        :return: episode diagnostics object
+        """
         
-            # DEBUG: print action space size # todo
-            if episode == 0:
-                print("env.action_space.n =", self.env.action_space.n)
+        # init per-episode values:
+        self.env.reset()
+        state = self.state_handler.get_state_index()
 
-            self.env.reset()
-            state = self.state_handler.get_state_index()
+        done = False
+        truncated = False
+        steps = 0
+        success = 0
+
+        total_raw_reward = 0.0
+        total_shaped_reward = 0.0
+
+        got_key = False
+        opened_door = False
+
+        # for SARSA - needs actoin before loop
+        action = None
+        if training and isinstance(self.agent, SARSAAgent):
+            action = self.agent.choose_action(
+                state_idx=state, 
+                force_greedy=force_greedy, 
+                allowed_actions=self.allowed_actions
+            )
+        
+        while not done and not truncated:
+            if not (training and isinstance(self.agent, SARSAAgent)):
+                action = self.agent.choose_action(
+                    state_idx=state,
+                    force_greedy=force_greedy,
+                    allowed_actions=self.allowed_actions
+                )
             
-            # episode termination indicators
-            done = False
-            truncated = False       
-
-            # reward trackers
-            total_raw_reward = 0
-            total_shaped_reward = 0
-
-            steps = 0               # step counter
-            success = 0             # success metric
-
-            # DEBUG: action counts # todo
-            action_counts = np.zeros(self.env.action_space.n, dtype=int)
-
-            # track state changes for reward shaping
-            got_key = False
-            opened_door = False
-
-            # for SARSA - needs actoin before loop
-            action = 0
-            if isinstance(self.agent, SARSAAgent):
-                action = self.agent.choose_action(state_idx=state, allowed_actions=self.allowed_actions)
+            # step:
+            obs, raw_reward, done, truncated, _ = self.env.step(action)
+            terminal = done or truncated    # treat truncated as terminal
+            next_state = self.state_handler.get_state_index()
             
-            while not done and not truncated:
-                if not isinstance(self.agent, SARSAAgent):
-                    action = self.agent.choose_action(state_idx=state, allowed_actions=self.allowed_actions)
-                
-                # DEBUG: front block state # todo
-                front_block_history.append(int(self.env.is_front_blocked()))
-                
-                # DEBUG: count actions # todo
-                action_counts[action] += 1
+            # reward shaping hook (if training):
+            shaped_reward = raw_reward
+            if use_shaping and self.reward_shaping_func:
+                shaped_reward = self.reward_shaping_func(
+                    self.env,
+                    raw_reward, 
+                    got_key,
+                    opened_door, 
+                )
+            got_key = got_key or self.env.is_carrying_key()
+            opened_door = opened_door or self.env.is_door_open()
 
-                # step:
-                obs, raw_reward, done, truncated, _ = self.env.step(action)
-                terminal = done or truncated    # treat truncated as terminal # todo: confirm this
-                next_state = self.state_handler.get_state_index()
-                
-                # todo
-                # reward shaping hook:
-                training_reward = raw_reward
-                if self.reward_shaping_func:
-                    training_reward = self.reward_shaping_func(
-                        self.env,
-                        raw_reward, 
-                        got_key,
-                        opened_door, 
-                    )
-                got_key = got_key or self.env.is_carrying_key()
-                opened_door = opened_door or self.env.is_door_open()
-
-                # update:
-                # **use training reward
+            # update (if training):
+            if training:
                 if isinstance(self.agent, QLearningAgent):
                     self.agent.update(
                         state=state,
                         action=action,
-                        reward=training_reward,
+                        reward=shaped_reward,
                         next_state=next_state,
                         done=terminal
                     )
                 elif isinstance(self.agent, SARSAAgent):
-                    next_action = 0 if terminal else self.agent.choose_action(state_idx=next_state, allowed_actions=self.allowed_actions)
+                    next_action = 0 if terminal else self.agent.choose_action(
+                        state_idx=next_state, 
+                        force_greedy=force_greedy, 
+                        allowed_actions=self.allowed_actions
+                    )
                     self.agent.update(
                         state=state,
                         action=action,
-                        reward=training_reward,
+                        reward=shaped_reward,
                         next_state=next_state,
                         next_action=next_action,
                         done=terminal
@@ -863,76 +954,31 @@ class ExperimentRunner:
                     self.agent.store_transition(
                         state=state,
                         action=action,
-                        reward=training_reward
+                        reward=shaped_reward
                     )
-                
-                state = next_state
-
-                # log both rewards
-                total_raw_reward += raw_reward
-                total_shaped_reward += training_reward
-
-                # signal success if reached goal
-                if done and raw_reward > 0:
-                    success = 1  
-
-                steps += 1
             
-            # end of episode update for MC
-            if isinstance(self.agent, MCAgent):
-                self.agent.update()
+            # advance
+            state = next_state
+            steps += 1
+
+            # log both rewards
+            total_raw_reward += raw_reward
+            total_shaped_reward += shaped_reward
+
+            # signal success if reached goal
+            if done and raw_reward > 0:
+                success = 1  
+
+        if training and isinstance(self.agent, MCAgent):
+            self.agent.update()
             
-            # decay epsilon
-            if hasattr(self.agent, 'epsilon') and self.agent.epsilon > 0.01:
-                self.agent.epsilon *= 0.995
+        return {
+            "total_raw_reward": total_raw_reward,
+            "total_shaped_reward": total_shaped_reward,
+            "steps": steps,
+            "success": success,
+        }
 
-            raw_rewards_history.append(total_raw_reward)
-            shaped_rewards_history.append(total_shaped_reward)
-            steps_history.append(steps)
-            success_history.append(success)
-
-            # DEBUG: end phase + side # todo
-            # collect end-of-episode diagnostics (key env only)
-            if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
-                self._append_episode_end_diagnostics(end_phase_hist, end_side_hist)
-
-            # DEBUG: action counts # todo
-            action_counts_window.append(action_counts)
-            if len(action_counts_window) > 100:
-                action_counts_window.pop(0)
-            got_key_hist.append(int(got_key))
-            opened_door_hist.append(int(opened_door))
-
-
-            if (episode + 1) % 100 == 0:
-                avg_reward_raw = np.mean(raw_rewards_history[-100:])
-                avg_reward_shaped = np.mean(shaped_rewards_history[-100:])
-                success_rate = float(np.mean(success_history[-100:])) * 100.0
-                print(f"[{self.agent.name}] Episode {episode + 1}/{self.num_episodes} | "
-                      f"Avg RAW Reward (last 100 ep.): {avg_reward_raw:.2f} | "
-                      f"Avg SHAPED Reward (last 100 ep.): {avg_reward_shaped:.2f} | "
-                      f"success={success_rate:.1f}%")
-                
-                # DEBUG: end phase + side # todo
-                if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
-                    self._print_episode_end_diagnostics(end_phase_hist, end_side_hist, window=100)
-                # DEBUG: front block state # todo
-                print(f"  front_blocked% (current episode): {100*np.mean(front_block_history):.1f}%")
-                # DEBUG: print action counts # todo
-                avg_counts = np.mean(np.stack(action_counts_window, axis=0), axis=0)
-                # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
-                # (your key env uses 6 actions: 0..5, so 'done' isn't present)
-                names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
-                avg_counts_str = ", ".join(f"{names[i]}={avg_counts[i]:.1f}" for i in range(self.env.action_space.n))
-                print(f"  avg_action_counts (last 100): {avg_counts_str}")
-                print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
-                print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
-                print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
-                print(f"  door_open% (last 100): {100*np.mean(opened_door_hist[-100:]):.1f}%")
-
-
-        return raw_rewards_history, shaped_rewards_history, steps_history, success_history
-    
     # --- Debugging / Diagnostics Helpers ---
     @property
     def _end_phase(self) -> int:
@@ -1015,15 +1061,15 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
     
     # penalty - step cost
     if reward == 0:
-        reward -= 0.01
+        return -0.01
     
-    # todo
-    if reward == 1:
-        reward = 20.0
+    # # todo
+    # if reward == 1:
+    #     reward = 20.0
 
-    # bonus - picked up key
-    if env.is_carrying_key() and not key_bonus_given:
-        reward += 15.0 
+    # # bonus - picked up key
+    # if env.is_carrying_key() and not key_bonus_given:
+    #     reward += 15.0 
     
     # # bonus - opened door
     # if env.is_door_open() and not door_bonus_given:
@@ -1123,19 +1169,22 @@ for agent_name, agent_cls in agents.items():
         **params  # lr, gamma, epsilon
     )
 
-    train_rewards_raw, train_rewards_shaped, train_steps, train_success = runner.run()
+    train_rewards_raw, train_rewards_shaped, train_steps, train_success = runner.train()
+    eval_metrics = runner.eval(num_episodes=200, use_shaping=False)
 
     results[agent_name] = {
         "train_rewards_raw": train_rewards_raw,
         "train_rewards_shaped": train_rewards_shaped,
         "train_steps": train_steps,
         "train_success": train_success,
+        **eval_metrics,
     }
     
     # cleanup
     runner.close()
 
 print("\nAll experiments complete.")
+print(results)
 
 # generate Plots
 plot_rewards(results)
