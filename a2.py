@@ -513,20 +513,31 @@ class StateHandler:
             has_key = self.env.is_carrying_key()
             is_door_open = self.env.is_door_open()
 
+            key_position = self.env.get_key_pos()
+            door_position = self.env.get_door_pos()
+            goal_position= self.env.get_goal_pos()
+
             # phase 0: no key -> target = key
             if not has_key:
                 phase_offset = 0  
-                target_position = self.env.get_key_pos()
+                target_position = key_position
 
             # phase 1: have key, door closed -> target = door
-            elif has_key and not is_door_open:
+            elif not is_door_open:
                 phase_offset = self.num_spatial_states  
-                target_position = self.env.get_door_pos()
+                target_position = door_position
             
-            # phase 2: door open -> target = goal
+            # phase 2: door open -> while in left room:         target = door
+            #                       once crossed to right room: target = goal
             else:
-                phase_offset = 2 * self.num_spatial_states  
-                target_position = self.env.get_goal_pos()
+                # phase
+                phase_offset = 2 * self.num_spatial_states
+
+                # target
+                wall_column = getattr(self.env.unwrapped, "partition_col", None)
+                agent_x = agent_position[0]
+                reached_door = (wall_column is not None and agent_x >= wall_column)
+                target_position = goal_position if reached_door else door_position
         
         # calculate relative vector (target - agent)
         dx = target_position[0] - agent_position[0]
@@ -755,7 +766,8 @@ class ExperimentRunner:
         action_counts_window = []
         got_key_hist = []
         opened_door_hist = []
-
+        end_phase_hist = []   # 0/1/2
+        end_side_hist = []    # 0=left, 1=right, 2=on partition/door column, -1=unknown
 
         for episode in range(self.num_episodes):
 
@@ -873,6 +885,11 @@ class ExperimentRunner:
             steps_history.append(steps)
             success_history.append(success)
 
+            # DEBUG: end phase + side # todo
+            # collect end-of-episode diagnostics (key env only)
+            if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
+                self._append_episode_end_diagnostics(end_phase_hist, end_side_hist)
+
             # DEBUG: action counts # todo
             action_counts_window.append(action_counts)
             if len(action_counts_window) > 100:
@@ -890,6 +907,9 @@ class ExperimentRunner:
                       f"Avg SHAPED Reward (last 100 ep.): {avg_reward_shaped:.2f} | "
                       f"success={success_rate:.1f}%")
                 
+                # DEBUG: end phase + side # todo
+                if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
+                    self._print_episode_end_diagnostics(end_phase_hist, end_side_hist, window=100)
                 # DEBUG: front block state # todo
                 print(f"  front_blocked% (current episode): {100*np.mean(front_block_history):.1f}%")
                 # DEBUG: print action counts # todo
@@ -906,6 +926,73 @@ class ExperimentRunner:
 
 
         return raw_rewards_history, shaped_rewards_history, steps_history, success_history
+    
+    # --- Debugging / Diagnostics Helpers ---
+    @property
+    def _end_phase(self) -> int:
+        """
+        Phase at end of episode:
+        0 - no key
+        1 - have key but door closed 
+        2 - door open
+        """
+        if not self.env.is_carrying_key():
+            return 0
+        if not self.env.is_door_open():
+            return 1
+        return 2
+
+    @property
+    def _end_side(self) -> int:
+        """
+        Side of partition wall where agent is at, at episode end:
+        0  - left of wall
+        1  - right of wall
+        2  - on wall column
+        -1 - unknown
+        """
+        agent_x, _ = self.env.get_position()
+        wall_column = getattr(self.env.unwrapped, "partition_col", None)   # safe for empty env too
+        if wall_column is None:
+            return -1
+        if agent_x < wall_column:
+            return 0
+        if agent_x > wall_column:
+            return 1
+        return 2
+
+    def _append_episode_end_diagnostics(self, end_phase_hist: List[int], end_side_hist: List[int]) -> None:
+        """Add episode-end diagnostics to history"""
+        end_phase_hist.append(self._end_phase)
+        end_side_hist.append(self._end_side)
+
+
+    def _print_episode_end_diagnostics(self, end_phase_hist: List[int], end_side_hist: List[int], window: int = 100) -> None:
+        """Print rolling episode-end diagnostics for last <window> episodes"""
+        
+        window = min(window, len(end_phase_hist))
+        if window <= 0:
+            return
+
+        # possible phases: 0,1,2 
+        phase_counts = np.bincount(end_phase_hist[-window:], minlength=3) / window * 100.0
+        print(
+            f"  end_phase% (last {window}): "
+            f"phase0(no_key)={phase_counts[0]:.1f}% | "
+            f"phase1(door_closed)={phase_counts[1]:.1f}% | "
+            f"phase2(door_open)={phase_counts[2]:.1f}%"
+        )
+
+        # filter out side=-1 (invalid)
+        sides = [side for side in end_side_hist[-window:] if side >= 0]
+        if len(sides) > 0:
+            side_counts = np.bincount(sides, minlength=3) / len(sides) * 100.0
+            print(
+                f"  end_side%  (last {window}): "
+                f"left={side_counts[0]:.1f}% | "
+                f"right={side_counts[1]:.1f}% | "
+                f"on_door_col={side_counts[2]:.1f}%"
+            )
 
     def close(self) -> None:
         self.env.close()
