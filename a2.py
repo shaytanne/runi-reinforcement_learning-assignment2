@@ -692,23 +692,29 @@ class MCAgent(BaseAgent):
         - executed at END of an episode
         - iterates backwards through episode buffer
         """
-        G: float = 0.0 # cumulative return
-        visited_pairs = set()
 
-        # traverse episode backwards
-        for state, action, reward in reversed(self.episode_buffer):
+        G = 0.0
+        trajectory = []
+        visited = set()
+
+        for (state, action, reward) in reversed(self.episode_buffer):
             G = self.gamma * G + reward
+            trajectory.append((state, action, G))
 
-            # first-visit MC check
-            if (state, action) not in visited_pairs:
-                visited_pairs.add((state, action))
+        # reverse to get original order
+        trajectory.reverse()
 
-                # rolling mean update: Q(s,a) = Q(s,a) + alpha * (G - Q(s,a))
-                # todo: consider 1/n returns avg instead of const alpha
-                old_q = self.q_table[state][action]
-                self.q_table[state][action] += self.lr * (G - old_q)
+        # first-visit MC update
+        for state, action, G in trajectory:
+            if (state, action) in visited:
+                continue
+            visited.add((state, action))
 
-        self.episode_buffer = [] # clear buffer
+            # rolling mean update: Q(s,a) = Q(s,a) + alpha * (G - Q(s,a))
+            # todo: consider 1/n returns avg instead of const alpha
+            self.q_table[state, action] += self.lr * (G - self.q_table[state, action])
+
+        self.episode_buffer = []    # clear buffer
     
     @property
     def name(self) -> str:
@@ -1019,9 +1025,9 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
     if env.is_carrying_key() and not key_bonus_given:
         reward += 50.0 
     
-    # bonus - opened door
-    if env.is_door_open() and not door_bonus_given:
-        reward += 50.0
+    # # bonus - opened door
+    # if env.is_door_open() and not door_bonus_given:
+    #     reward += 50.0
         
     return reward
 
