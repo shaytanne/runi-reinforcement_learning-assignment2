@@ -536,8 +536,8 @@ class StateHandler:
                 # target
                 wall_column = getattr(self.env.unwrapped, "partition_col", None)
                 agent_x = agent_position[0]
-                reached_door = (wall_column is not None and agent_x >= wall_column)
-                target_position = goal_position if reached_door else door_position
+                is_crossed = (wall_column is not None and agent_x > wall_column)
+                target_position = goal_position if is_crossed else door_position
         
         # calculate relative vector (target - agent)
         dx = target_position[0] - agent_position[0]
@@ -923,8 +923,8 @@ class ExperimentRunner:
                 # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
                 # (your key env uses 6 actions: 0..5, so 'done' isn't present)
                 names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
-                # for i, name in enumerate(names[:self.env.action_space.n]):
-                #     print(f"  avg {name}: {avg_counts[i]:.1f}")
+                avg_counts_str = ", ".join(f"{names[i]}={avg_counts[i]:.1f}" for i in range(self.env.action_space.n))
+                print(f"  avg_action_counts (last 100): {avg_counts_str}")
                 print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
                 print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
                 print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
@@ -1015,19 +1015,19 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
     
     # penalty - step cost
     if reward == 0:
-        reward -= 0.1
+        reward -= 0.01
     
     # todo
     if reward == 1:
-        reward = 10.0
+        reward = 20.0
 
     # bonus - picked up key
     if env.is_carrying_key() and not key_bonus_given:
-        reward += 50.0 
+        reward += 15.0 
     
     # # bonus - opened door
     # if env.is_door_open() and not door_bonus_given:
-    #     reward += 50.0
+    #     reward += 15.0
         
     return reward
 
