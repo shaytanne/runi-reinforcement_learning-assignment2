@@ -31,7 +31,7 @@ from minigrid.minigrid_env import MiniGridEnv as BaseMiniGridEnv
 
 from abc import ABC, abstractmethod
 import pickle
-from collections import defaultdict
+from collections import defaultdict, deque
 from minigrid.minigrid_env import MiniGridEnv
 from typing import Any, List, Tuple, Optional, Callable, Dict
 
@@ -761,7 +761,7 @@ class ExperimentRunner:
         )
         self.agent.allowed_actions = self.allowed_actions
 
-    def train(self) -> Tuple[List[float], List[float], List[int], List[int]]:
+    def train(self) -> Tuple[List[float], List[float], List[int], List[int], Optional[List]]:
         """
         Wrapper for running training loop
         :return : both rewards histories, steps + success histories
@@ -770,7 +770,8 @@ class ExperimentRunner:
             num_episodes=self.num_episodes, 
             training=True, 
             use_shaping=True, 
-            force_greedy=False
+            force_greedy=False,
+            return_diagnoastics=True
         )
 
     def eval(self, num_episodes: int = 200, use_shaping: bool = False) -> Dict[str, float]:
@@ -788,31 +789,36 @@ class ExperimentRunner:
             self.agent.epsilon = 0.0
         
         # run:
-        raw_rewards_history, shaped_rewards_history, steps_history, success_history = self._run(
+        raw_rewards_history, shaped_rewards_history, steps_history, success_history, diagnostics = self._run(
             num_episodes=num_episodes, 
             training=False,
             use_shaping=use_shaping,
-            force_greedy=True
+            force_greedy=True,
+            return_diagnoastics=True
         )
 
         if old_epsilon is not None:
             self.agent.epsilon = old_epsilon
+
+        # # print additional diagnostics
+        # print(f"\n[{self.agent.name}][Evaluation (greedy) Diagnostics ] " + self._format_diagnostics_printout(diagnostics))
         
         return {
             "eval_success_rate": float(np.mean(success_history)),
             "eval_avg_steps": float(np.mean(steps_history)),
             "eval_avg_raw_reward": float(np.mean(raw_rewards_history)),
-            "eval_avg_shaped_reward": float(np.mean(shaped_rewards_history)),
         }
 
-    def _run(self, num_episodes: int, training: bool, use_shaping: bool, force_greedy: bool) -> Tuple[List[float], List[float], List[int], List[int]]:
+    def _run(self, num_episodes: int, training: bool, use_shaping: bool, force_greedy: bool, return_diagnoastics: bool = False
+             ) -> Tuple[List[float], List[float], List[int], List[int], Optional[List]]:
         """
         Core loop for training/eval
         :param num_episodes: number of episodes to run
         :param training: is training mode?
         :param use_shaping: use reward shaping?
         :param force_greedy: force greedy action selection (no exploration)
-        :return : rewards histories, steps + success histories
+        :param return_diagnoastics: return per-episode additional diagnostics?
+        :return : rewards histories, steps + success histories, additional diagnostics (optional)
         """
 
         raw_rewards_history = []
@@ -820,12 +826,20 @@ class ExperimentRunner:
         steps_history = []
         success_history = []
 
+        diagnostics_window = deque(maxlen=100)
+        additional_diagnostics = [] if return_diagnoastics else None
+
         for episode in range(num_episodes):
             episode_diagnostics = self._run_episode(
                 training=training, 
                 use_shaping=use_shaping,
                 force_greedy=force_greedy
             )
+
+            # log metrics/diagnostics
+            diagnostics_window.append(episode_diagnostics)
+            if return_diagnoastics:
+                additional_diagnostics.append(episode_diagnostics)
 
             # log episode diagnostics
             raw_rewards_history.append(episode_diagnostics["total_raw_reward"])
@@ -840,32 +854,10 @@ class ExperimentRunner:
             
             # print diagnostics (100 episode batches)
             if training and (episode + 1) % 100 == 0:
-                avg_reward_raw = np.mean(raw_rewards_history[-100:])
-                avg_reward_shaped = np.mean(shaped_rewards_history[-100:])
-                success_rate = float(np.mean(success_history[-100:])) * 100.0
-                print(f"\n[{self.agent.name}] Episode {episode + 1}/{self.num_episodes} | "
-                      f"Avg RAW Reward: {avg_reward_raw:.2f} | "
-                      f"Avg SHAPED Reward: {avg_reward_shaped:.2f} | "
-                      f"success={success_rate:.1f}%")
-                
-                # # DEBUG: end phase + side # todo
-                # if isinstance(self.env.unwrapped, RandomKeyMEnv_10):
-                #     self._print_episode_end_diagnostics(end_phase_hist, end_side_hist, window=100)
-                # # DEBUG: front block state # todo
-                # print(f"  front_blocked% (current episode): {100*np.mean(front_block_history):.1f}%")
-                # # DEBUG: print action counts # todo
-                # avg_counts = np.mean(np.stack(action_counts_window, axis=0), axis=0)
-                # # MiniGrid action names by index: 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
-                # # (your key env uses 6 actions: 0..5, so 'done' isn't present)
-                # names = ["left", "right", "forward", "pickup", "drop", "toggle", "done"]
-                # avg_counts_str = ", ".join(f"{names[i]}={avg_counts[i]:.1f}" for i in range(self.env.action_space.n))
-                # print(f"  avg_action_counts (last 100): {avg_counts_str}")
-                # print(f"  mean steps (last 100): {np.mean(steps_history[-100:]):.1f}")
-                # print(f"  sum(avg action counts): {avg_counts.sum():.1f}")
-                # print(f"  got_key% (last 100): {100*np.mean(got_key_hist[-100:]):.1f}%")
-                # print(f"  door_open% (last 100): {100*np.mean(opened_door_hist[-100:]):.1f}%")
-
-        return raw_rewards_history, shaped_rewards_history, steps_history, success_history
+                print(f"\n[{self.agent.name}][Episodes {episode+1}/{self.num_episodes}] "
+                      f"{self._format_diagnostics_printout(episode_summaries=list(diagnostics_window))}")
+        
+        return raw_rewards_history, shaped_rewards_history, steps_history, success_history, additional_diagnostics
     
     def _run_episode(self, training: bool, use_shaping: bool, force_greedy: bool) -> Dict[str, Any]:
         """
@@ -890,6 +882,7 @@ class ExperimentRunner:
 
         got_key = False
         opened_door = False
+        action_counts = np.zeros(self.env.action_space.n, dtype=np.int32)
 
         # for SARSA - needs actoin before loop
         action = None
@@ -907,6 +900,9 @@ class ExperimentRunner:
                     force_greedy=force_greedy,
                     allowed_actions=self.allowed_actions
                 )
+
+            # increment action count
+            action_counts[action] += 1
             
             # step:
             obs, raw_reward, done, truncated, _ = self.env.step(action)
@@ -971,15 +967,71 @@ class ExperimentRunner:
 
         if training and isinstance(self.agent, MCAgent):
             self.agent.update()
-            
+        
         return {
             "total_raw_reward": total_raw_reward,
             "total_shaped_reward": total_shaped_reward,
             "steps": steps,
             "success": success,
-        }
 
+            # debug diagnostics
+            "action_counts": action_counts,
+            "got_key": int(got_key),
+            "opened_door": int(opened_door),
+            "end_side": self._final_side_of_wall,
+        }
+        
     # --- Debugging / Diagnostics Helpers ---
+    def _format_diagnostics_printout(self, episode_summaries: Optional[List[Dict]]) -> str:
+        
+        if not episode_summaries:
+            return "No episode info available"
+
+        # core metrics
+        success = 100.0 * np.mean([diagnostics["success"] for diagnostics in episode_summaries])
+        steps = np.mean([diagnostics["steps"] for diagnostics in episode_summaries])
+        raw = np.mean([diagnostics["total_raw_reward"] for diagnostics in episode_summaries])
+        shaped = np.mean([diagnostics["total_shaped_reward"] for diagnostics in episode_summaries])
+
+        # key+door metrics
+        got_key = 100.0 * np.mean([diagnostics.get("got_key", 0) for diagnostics in episode_summaries])
+        opened_door = 100.0 * np.mean([diagnostics.get("opened_door", 0) for diagnostics in episode_summaries])
+
+        # side of wall metrics
+        sides = [diagnostics.get("end_side", -1) for diagnostics in episode_summaries]
+        sides = [s for s in sides if s >= 0]    # filter out invalid items
+        if sides:
+            counts = np.bincount(sides, minlength=3) / len(sides) * 100.0
+            side_str = f"left/right/at door = {counts[0]:.0f}/{counts[1]:.0f}/{counts[2]:.0f}%"
+        else:
+            side_str = "left/right/at door = ?"
+        
+        # average action counts per episode
+        # 0 left, 1 right, 2 forward, 3 pickup, 4 drop, 5 toggle, 6 done
+        action_sum = np.sum([diagnostics["action_counts"] for diagnostics in episode_summaries], axis=0) / len(episode_summaries)
+        action_names = ["L", "R", "F", "P", "D", "T", "X"]
+        # only print actions that exist in this env.action_space.n
+        n = len(action_sum)
+        action_str = "  ".join(f"{action_names[i]}={action_sum[i]:.1f}" for i in range(n))
+
+        return (f"SUCCESS RATE: {success:3.1f}% | avg steps: {steps:5.1f} | "
+                f"avg raw rewards: {raw:5.2f} | avg shaped rewards: {shaped:5.2f}\n"
+                f"key-pickup rate: {got_key:2.0f}% | door-opened rate: {opened_door:2.0f}% | final agent posistion WRT wall: {side_str}\n"
+                f"avg action counts: {action_str}")
+
+    @property
+    def _final_side_of_wall(self) -> int:
+        agent_x, _ = self.env.get_position()
+        wall_column = getattr(self.env.unwrapped, "partition_col", None)
+        if wall_column is None:
+            return -1
+        elif agent_x < wall_column:
+            return 0
+        elif agent_x > wall_column:
+            return 1
+        else:
+            return 2
+        
     @property
     def _end_phase(self) -> int:
         """
@@ -1169,22 +1221,25 @@ for agent_name, agent_cls in agents.items():
         **params  # lr, gamma, epsilon
     )
 
-    train_rewards_raw, train_rewards_shaped, train_steps, train_success = runner.train()
+    train_rewards_raw, train_rewards_shaped, train_steps, train_success, diagnostics = runner.train()
     eval_metrics = runner.eval(num_episodes=200, use_shaping=False)
 
     results[agent_name] = {
         "train_rewards_raw": train_rewards_raw,
         "train_rewards_shaped": train_rewards_shaped,
         "train_steps": train_steps,
-        "train_success": train_success,
-        **eval_metrics,
+        # "train_success": train_success,
     }
+
+    # log eval metrics
+    metrics_str = ", ".join(f"{metric}: {val:.3f}" for metric, val in eval_metrics.items())
+    print(f"\n[{agent_name}] Evaluation Metrics: {metrics_str}")
     
     # cleanup
     runner.close()
 
 print("\nAll experiments complete.")
-print(results)
 
 # generate Plots
 plot_rewards(results)
+# plot_success(results)
