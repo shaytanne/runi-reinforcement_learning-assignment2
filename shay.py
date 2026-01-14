@@ -576,7 +576,11 @@ def record_agent_video(env, agent, state_handler, filename, max_steps=250) -> No
         video.append_data(env.render()) # capture initial frame
 
         while not (done or truncated) and step_count < max_steps:
-            action = agent.choose_action(state, force_greedy=True)  # use greedy action (epsilon=0)
+            action = agent.choose_action(
+                state_idx=state, 
+                force_greedy=True,  # use greedy action (epsilon=0)
+                allowed_actions=agent.allowed_actions
+            )  
             obs, reward, done, truncated, info = env.step(action)   # step in env
             state = state_handler.get_state_index()                 # update state
             video.append_data(env.render())                         # capture frame
@@ -755,12 +759,8 @@ def key_door_reward_shaping_func(env: KeyFlatObsWrapper, reward: float , key_bon
 
     # SARSA / Q-Learning
     else:
-      step_penalty = 1.0
-      key_bonus = 5.0
-      #door_bonus = 5.0
-      #goal_bonus = 80
-
-    #   key_bonus = 0
+      step_penalty = 0.05
+      key_bonus = 10.0
       door_bonus = 0
       goal_bonus = 0
       post_door_guidance = False
@@ -823,6 +823,9 @@ class ExperimentRunner:
             **agent_kwargs
         )
         self.agent.allowed_actions = self.allowed_actions
+
+        # storage for agent's videos
+        self.video_paths = {}
 
     def train(self) -> Tuple[List[float], List[float], List[int], List[int], Optional[List]]:
         """
@@ -939,8 +942,7 @@ class ExperimentRunner:
                 
         return raw_rewards_history, shaped_rewards_history, steps_history, success_history, additional_diagnostics
     
-    @staticmethod
-    def _record_video(env: Any, agent: BaseAgent, state_handler: StateHandler, stage: str) -> None:
+    def _record_video(self, env: Any, agent: BaseAgent, state_handler: StateHandler, stage: str) -> None:
         """Context wrapper for video recording util"""
         env_name = env.__class__.__name__
         filename = f"{agent.name}_{env_name}_{stage}-training.mp4"
@@ -952,7 +954,9 @@ class ExperimentRunner:
             state_handler=state_handler, 
             filename=filename
         )
-        IPython.display.display(embed_mp4(filename)) # todo
+        
+        # store video path
+        self.video_paths[stage] = filename
 
     def _run_episode(self, training: bool, use_shaping: bool, force_greedy: bool) -> Dict[str, Any]:
         """
@@ -1352,6 +1356,13 @@ for env_name, env_class in environments_to_test.items():
 
         metrics_str = ", ".join(f"{metric}: {val:.3f}" for metric, val in eval_metrics.items())
         print(f"\n[{agent_name} on {env_name}] Evaluation Metrics: {metrics_str}")
+
+        # embed agent's videos
+        if runner.video_paths:
+            print(f"\n--- Videos for {agent_name} ---")
+            for stage, path in runner.video_paths.items():
+                IPython.display.display(embed_mp4(path))
+                print(f"{stage}-training: {path}\n")
 
         runner.close()
 
