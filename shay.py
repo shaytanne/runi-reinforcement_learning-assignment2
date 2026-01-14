@@ -97,7 +97,6 @@ class MiniGridEnv(BaseMiniGridEnv):
     def reset(self, *, seed=None, options=None):
         return super().reset(seed=seed, options=options)
 
-
 # =============================================================================
 # ENVIRONMENT 1: RANDOM EMPTY GRID
 # =============================================================================
@@ -455,7 +454,7 @@ class KeyFlatObsWrapper(gym.ObservationWrapper):
         
         # no other obstacles
         return False
-      
+ 
 
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
@@ -482,7 +481,6 @@ class StateHandler:
         # relative vector = (target-agent) , in the range [-width, +width] i.e.
         self.relative_position_range = self.width * 2
 
-        # todo: ensure references to num_spatial_states arent broken
         self.num_spatial_states = (self.relative_position_range * self.relative_position_range)
         self.num_spatial_states *= (self.NUM_DIRECTIONS * self.NUM_BLOCKED_STATES)
 
@@ -562,36 +560,26 @@ class StateHandler:
         return idx
               
 
-import imageio
-def record_agent_video(env, agent, state_handler, filename, max_steps=200):
+def record_agent_video(env, agent, state_handler, filename, max_steps=250) -> None:
     """
-    Records a video of the agent's current policy (greedy).
+    Records a video of agent's current policy (greedy).
     """
-    # Ensure the environment is in the right mode
-    # Note: env must be initialized with render_mode='rgb_array'
+    # env must be initialized with render_mode='rgb_array'
 
-    with imageio.get_writer(filename, fps=10) as video:
+    with imageio.get_writer(filename, fps=10, macro_block_size=None) as video:
+        # init
         obs, _ = env.reset()
-        mg_env = env.unwrapped
-
-        # Reset milestones for the video run
-        global milestones
-        milestones = {"key_rewarded": False, "door_rewarded": False}
-
-        state = state_handler.get_state_index(mg_env)
+        state = state_handler.get_state_index()
         done = False
         truncated = False
         step_count = 0
+        video.append_data(env.render()) # capture initial frame
 
         while not (done or truncated) and step_count < max_steps:
-            # Use greedy action (epsilon=0) to see what the agent has "learned"
-            action = agent.choose_action(state, force_greedy=True)
-
-            obs, reward, done, truncated, info = env.step(action)
-            state = state_handler.get_state_index(mg_env)
-
-            # Capture the frame
-            video.append_data(env.render())
+            action = agent.choose_action(state, force_greedy=True)  # use greedy action (epsilon=0)
+            obs, reward, done, truncated, info = env.step(action)   # step in env
+            state = state_handler.get_state_index()                 # update state
+            video.append_data(env.render())                         # capture frame
             step_count += 1
 
         print(f"Video saved to {filename} (Steps: {step_count})")
@@ -685,7 +673,7 @@ class QLearningAgent(BaseAgent):
     
     @property
     def name(self) -> str:
-        return "Q-Learning Agent"
+        return "Q-Learning"
 
 
 class SARSAAgent(BaseAgent):
@@ -750,7 +738,7 @@ class MCAgent(BaseAgent):
     
     @property
     def name(self) -> str:
-        return "MC Agent"
+        return "MC"
 
 
 def key_door_reward_shaping_func(env: KeyFlatObsWrapper, reward: float , key_bonus_given: bool, door_bonus_given: bool, agent) -> float:
@@ -772,7 +760,7 @@ def key_door_reward_shaping_func(env: KeyFlatObsWrapper, reward: float , key_bon
       #door_bonus = 5.0
       #goal_bonus = 80
 
-      key_bonus = 0
+    #   key_bonus = 0
       door_bonus = 0
       goal_bonus = 0
       post_door_guidance = False
@@ -849,7 +837,7 @@ class ExperimentRunner:
             return_diagnoastics=True
         )
 
-    def eval(self, num_episodes: int = 200, use_shaping: bool = False) -> Dict[str, float]:
+    def eval(self, num_episodes: int = 200, use_shaping: bool = False, record_video: bool = False) -> Dict[str, float]:
         """
         Wrapper for running evaluation loop
         - fixed number of episodes
@@ -857,6 +845,15 @@ class ExperimentRunner:
         :param use_shaping: use reward shaping?
         :return : diagnostics summary object
         """
+
+        # record post-training video
+        if record_video:
+            self._record_video(
+                env=self.env, 
+                agent=self.agent, 
+                state_handler=self.state_handler,
+                stage="post"
+            )
 
         # manually disable exploration
         old_epsilon = getattr(self.agent, "epsilon", None)
@@ -875,9 +872,6 @@ class ExperimentRunner:
         if old_epsilon is not None:
             self.agent.epsilon = old_epsilon
 
-        # # print additional diagnostics # todo
-        # print(f"\n[{self.agent.name}][EVAL (greedy)] " + self._format_diagnostics_printout(diagnostics))
-        
         return {
             "eval_success_rate": float(np.mean(success_history)),
             "eval_avg_steps": float(np.mean(steps_history)),
@@ -933,9 +927,33 @@ class ExperimentRunner:
             if training and (episode + 1) % 100 == 0:
                 print(f"\n[{self.agent.name}][Episodes {episode+1}/{self.num_episodes}] "
                       f"{self._format_diagnostics_printout(episode_summaries=list(diagnostics_window))}")
-        
+
+            # record mid-training video
+            if training and (episode == num_episodes // 2):
+                self._record_video(
+                    env=self.env, 
+                    agent=self.agent, 
+                    state_handler=self.state_handler,
+                    stage="mid"
+                )
+                
         return raw_rewards_history, shaped_rewards_history, steps_history, success_history, additional_diagnostics
     
+    @staticmethod
+    def _record_video(env: Any, agent: BaseAgent, state_handler: StateHandler, stage: str) -> None:
+        """Context wrapper for video recording util"""
+        env_name = env.__class__.__name__
+        filename = f"{agent.name}_{env_name}_{stage}-training.mp4"
+        
+        print(f"\nRecording {stage}-training video for {agent.name} in {env_name}: {filename}")
+        record_agent_video(
+            env=env, 
+            agent=agent, 
+            state_handler=state_handler, 
+            filename=filename
+        )
+        IPython.display.display(embed_mp4(filename)) # todo
+
     def _run_episode(self, training: bool, use_shaping: bool, force_greedy: bool) -> Dict[str, Any]:
         """
         Runs single episode in the environment
@@ -1191,13 +1209,13 @@ def evaluate(env, agent, state_handler, episodes=100):
     for _ in range(episodes):
         obs, _ = env.reset()
         mg_env = env.unwrapped
-        state = state_handler.get_state_index(mg_env)
+        state = state_handler.get_state_index()
 
         total_reward = 0
         for step in range(200):
             action = agent.choose_action(state, force_greedy=True)
             _, reward, done, truncated, _ = env.step(action)
-            state = state_handler.get_state_index(mg_env)
+            state = state_handler.get_state_index()
             total_reward += reward
             if done or truncated:
                 break
@@ -1208,7 +1226,6 @@ def evaluate(env, agent, state_handler, episodes=100):
     agent.epsilon = old_epsilon
     return rewards, steps
 
-# ====================== PLOTTING UTILS =====================
 
 def plot_success(results_dict: Dict, window: int = 50, save_path: Optional[str] = None) -> None:
     plt.figure(figsize=(10, 4))
@@ -1277,9 +1294,6 @@ def plot_rewards(results_dict: Dict, window: int = 50, save_path: Optional[str] 
     plt.show()
 
 
-# ====================== EXPERIMENT DRIVER BLOCK =====================
-
-# agents to test
 agents_to_test = {
     "Q-Learning": {
         "class": QLearningAgent,
@@ -1300,8 +1314,8 @@ environments_to_test = {
     "KeyDoorEnv": RandomKeyMEnv_10,
 }
 
+# ============ main experiment drive block ===============:
 all_results = {}
-
 for env_name, env_class in environments_to_test.items():
     print(f"\n{'='*25} STARTING EXPERIMENTS ON ENVIRONMENT: {env_name} {'='*25}")
     results_for_env = {}
@@ -1326,7 +1340,7 @@ for env_name, env_class in environments_to_test.items():
         )
 
         train_rewards_raw, train_rewards_shaped, train_steps, train_success, _ = runner.train()
-        eval_metrics = runner.eval(num_episodes=200, use_shaping=False)
+        eval_metrics = runner.eval(num_episodes=200, use_shaping=False, record_video=True)
 
         results_for_env[agent_name] = {
             "train_rewards_raw": train_rewards_raw,
@@ -1349,10 +1363,3 @@ for env_name, env_class in environments_to_test.items():
     plot_success(results_for_env)
 
 print("\n\nAll experiments complete.")
-
-# # save full results to summary file
-# all_results_path = os.path.join(RESULTS_DIR, 'all_experiment_results.pkl')
-# with open(all_results_path, 'wb') as f:
-#     pickle.dump(all_results, f)
-# print(f"Full results dictionary saved to {all_results_path}")
-
