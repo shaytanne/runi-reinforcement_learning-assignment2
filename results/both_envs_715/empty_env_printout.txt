@@ -1,0 +1,136 @@
+
+========================= STARTING EXPERIMENTS ON ENVIRONMENT: EmptyEnv =========================
+
+--- Training Q-Learning in EmptyEnv ---
+
+[Q-Learning Agent][Episodes 100/1000] SUCCESS RATE: 70.0% | avg steps: 139.2 | avg raw rewards:  0.70 | avg shaped rewards:  0.70
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=46.1  R=45.8  F=47.3
+
+[Q-Learning Agent][Episodes 200/1000] SUCCESS RATE: 100.0% | avg steps:  42.8 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=13.0  R=13.2  F=16.6
+
+[Q-Learning Agent][Episodes 300/1000] SUCCESS RATE: 100.0% | avg steps:  22.8 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=6.1  R=5.5  F=11.2
+
+[Q-Learning Agent][Episodes 400/1000] SUCCESS RATE: 100.0% | avg steps:  13.1 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=2.7  R=2.5  F=7.8
+
+[Q-Learning Agent][Episodes 500/1000] SUCCESS RATE: 100.0% | avg steps:  13.0 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=2.3  R=2.1  F=8.7
+
+[Q-Learning Agent][Episodes 600/1000] SUCCESS RATE: 100.0% | avg steps:  11.1 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.7  R=1.4  F=8.1
+
+[Q-Learning Agent][Episodes 700/1000] SUCCESS RATE: 100.0% | avg steps:  11.7 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.9  R=1.6  F=8.2
+
+[Q-Learning Agent][Episodes 800/1000] SUCCESS RATE: 100.0% | avg steps:  11.4 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.8  R=1.5  F=8.1
+
+[Q-Learning Agent][Episodes 900/1000] SUCCESS RATE: 100.0% | avg steps:  11.7 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.8  R=1.6  F=8.3
+
+[Q-Learning Agent][Episodes 1000/1000] SUCCESS RATE: 100.0% | avg steps:  11.0 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.6  R=1.3  F=8.1
+
+[Q-Learning on EmptyEnv] Evaluation Metrics: eval_success_rate: 1.000, eval_avg_steps: 10.590, eval_avg_raw_reward: 1.000
+
+--- Training SARSA in EmptyEnv ---
+
+[SARSA Agent][Episodes 100/1000] SUCCESS RATE: 56.0% | avg steps: 172.5 | avg raw rewards:  0.56 | avg shaped rewards:  0.56
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=57.4  R=57.6  F=57.6
+
+[SARSA Agent][Episodes 200/1000] SUCCESS RATE: 94.0% | avg steps:  67.5 | avg raw rewards:  0.94 | avg shaped rewards:  0.94
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=21.0  R=21.3  F=25.2
+
+[SARSA Agent][Episodes 300/1000] SUCCESS RATE: 100.0% | avg steps:  34.9 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=9.8  R=10.4  F=14.7
+
+[SARSA Agent][Episodes 400/1000] SUCCESS RATE: 100.0% | avg steps:  22.9 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=5.9  R=5.8  F=11.1
+
+[SARSA Agent][Episodes 500/1000] SUCCESS RATE: 100.0% | avg steps:  18.9 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=4.5  R=4.7  F=9.6
+
+[SARSA Agent][Episodes 600/1000] SUCCESS RATE: 100.0% | avg steps:  13.4 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=2.7  R=2.8  F=7.9
+
+[SARSA Agent][Episodes 700/1000] SUCCESS RATE: 100.0% | avg steps:  13.4 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=2.2  R=2.3  F=8.9
+
+[SARSA Agent][Episodes 800/1000] SUCCESS RATE: 100.0% | avg steps:  12.8 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.7  R=2.1  F=9.0
+
+[SARSA Agent][Episodes 900/1000] SUCCESS RATE: 100.0% | avg steps:  12.0 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.6  R=1.7  F=8.7
+
+[SARSA Agent][Episodes 1000/1000] SUCCESS RATE: 100.0% | avg steps:  11.3 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=1.3  R=1.7  F=8.3
+
+[SARSA on EmptyEnv] Evaluation Metrics: eval_success_rate: 1.000, eval_avg_steps: 10.300, eval_avg_raw_reward: 1.000
+
+--- Training Monte Carlo in EmptyEnv ---
+
+[MC Agent][Episodes 100/1000] SUCCESS RATE: 70.0% | avg steps: 137.2 | avg raw rewards:  0.70 | avg shaped rewards:  0.70
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=44.7  R=45.4  F=47.2
+
+[MC Agent][Episodes 200/1000] SUCCESS RATE: 98.0% | avg steps:  52.2 | avg raw rewards:  0.98 | avg shaped rewards:  0.98
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=15.8  R=15.4  F=21.0
+
+[MC Agent][Episodes 300/1000] SUCCESS RATE: 100.0% | avg steps:  29.0 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=7.8  R=7.3  F=13.9
+
+[MC Agent][Episodes 400/1000] SUCCESS RATE: 100.0% | avg steps:  21.4 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=5.0  R=4.5  F=11.9
+
+[MC Agent][Episodes 500/1000] SUCCESS RATE: 100.0% | avg steps:  23.5 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=8.7  R=4.0  F=10.9
+
+[MC Agent][Episodes 600/1000] SUCCESS RATE: 100.0% | avg steps:  18.6 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=2.9  R=3.4  F=12.3
+
+[MC Agent][Episodes 700/1000] SUCCESS RATE: 99.0% | avg steps:  24.1 | avg raw rewards:  0.99 | avg shaped rewards:  0.99
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=8.3  R=5.1  F=10.7
+
+[MC Agent][Episodes 800/1000] SUCCESS RATE: 100.0% | avg steps:  23.2 | avg raw rewards:  1.00 | avg shaped rewards:  1.00
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=8.2  R=5.0  F=10.0
+
+[MC Agent][Episodes 900/1000] SUCCESS RATE: 98.0% | avg steps:  30.5 | avg raw rewards:  0.98 | avg shaped rewards:  0.98
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=12.5  R=5.7  F=12.3
+
+[MC Agent][Episodes 1000/1000] SUCCESS RATE: 98.0% | avg steps:  26.2 | avg raw rewards:  0.98 | avg shaped rewards:  0.98
+key-pickup rate:  0% | door-opened rate:  0% | final agent posistion WRT wall: left/right/at door = ?
+avg action counts: L=11.8  R=4.1  F=10.3
+
+[Monte Carlo on EmptyEnv] Evaluation Metrics: eval_success_rate: 0.920, eval_avg_steps: 30.505, eval_avg_raw_reward: 0.920
+
+--- Generating plots for EmptyEnv ---
