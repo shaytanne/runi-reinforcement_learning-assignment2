@@ -4,6 +4,8 @@ from __future__ import annotations
 # 2. Standard Library Imports
 import base64
 import copy
+import os
+import pickle
 import random
 
 # 3. Third-Party Data & Visualization Imports
@@ -25,19 +27,7 @@ from minigrid.core.mission import MissionSpace
 from minigrid.core.world_object import Door, Goal, Key, Wall
 from minigrid.minigrid_env import MiniGridEnv as BaseMiniGridEnv
 
-# --- Configuration ---
 
-# Configure Matplotlib for Notebook Environment
-%matplotlib inline
-plt.rcParams['figure.figsize'] = (10.0, 8.0)
-plt.rcParams['image.interpolation'] = 'nearest'
-plt.rcParams['image.cmap'] = 'gray'
-
-# %% [markdown]
-# # Display utils
-# The cell below contains the video display configuration. No need to make changes here.
-
-# %%
 def embed_mp4(filename):
   """Embeds an mp4 file in the notebook."""
   video = open(filename,'rb').read()
@@ -469,7 +459,6 @@ class KeyFlatObsWrapper(gym.ObservationWrapper):
 
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
-from minigrid.minigrid_env import MiniGridEnv
 from typing import Any, List, Tuple, Optional, Callable, Dict
 
 
@@ -663,15 +652,15 @@ class BaseAgent(ABC):
         # todo: implement by inheriting classes
         raise NotImplementedError("This method should be overridden by subclasses")
 
-    def save_q_table(self, filename: str = "q_table.pkl") -> None:
-        """Util for saving Q-table to file"""
-        with open(filename, "wb") as f:
-            pickle.dump(self.q_table, f)
+    # def save_q_table(self, filename: str = "q_table.pkl") -> None:
+    #     """Util for saving Q-table to file"""
+    #     with open(filename, "wb") as f:
+    #         pickle.dump(self.q_table, f)
 
-    def load_q_table(self, filename: str = "q_table.pkl") -> None:
-        """Util for loading Q-table from file"""
-        with open(filename, "rb") as f:
-            self.q_table = pickle.load(f)
+    # def load_q_table(self, filename: str = "q_table.pkl") -> None:
+    #     """Util for loading Q-table from file"""
+    #     with open(filename, "rb") as f:
+    #         self.q_table = pickle.load(f)
 
 
 class QLearningAgent(BaseAgent):
@@ -714,7 +703,6 @@ class SARSAAgent(BaseAgent):
     @property
     def name(self) -> str:
         return "SARSA Agent"
-
 
 
 class MCAgent(BaseAgent):
@@ -765,8 +753,7 @@ class MCAgent(BaseAgent):
         return "MC Agent"
 
 
-def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_given: bool, door_bonus_given: bool, agent) -> float:
-
+def key_door_reward_shaping_func(env: KeyFlatObsWrapper, reward: float , key_bonus_given: bool, door_bonus_given: bool, agent) -> float:
     """
     Reward shaping to guide agent in env 2
     """
@@ -778,8 +765,7 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
       goal_bonus = 50.0
       post_door_guidance = False
 
-
-  # SARSA / Q-Learning (TD)
+    # SARSA / Q-Learning
     else:
       step_penalty = 1.0
       key_bonus = 5.0
@@ -791,35 +777,26 @@ def key_door_reward_shaping(env: KeyFlatObsWrapper, reward: float , key_bonus_gi
       goal_bonus = 0
       post_door_guidance = False
 
-
-
+    # idle step penalty
     if reward == 0:
         reward -= step_penalty
 
-    # =========================
-    # Terminal reward
-    # =========================
+    # amplify goal reward
     if reward == 1:
         reward += goal_bonus
 
-    # =========================
-    # Milestones (one-time)
-    # =========================
+    # key/door rewards
     if env.is_carrying_key() and not key_bonus_given:
         reward += key_bonus
-
     if env.is_door_open() and not door_bonus_given:
         reward += door_bonus
 
-    # =========================
-    # Post-door shaping (TD only)
-    # =========================
+    # once in right room reward motion toward goal
     if post_door_guidance and env.is_door_open() and reward == 0:
         agent_pos = env.get_position()
         goal_pos = env.get_goal_pos()
         dist = abs(agent_pos[0] - goal_pos[0]) + abs(agent_pos[1] - goal_pos[1])
         reward += 0.2 / (dist + 1)
-
 
     return reward
 
@@ -1232,7 +1209,8 @@ def evaluate(env, agent, state_handler, episodes=100):
     return rewards, steps
 
 # ====================== PLOTTING UTILS =====================
-def plot_success(results_dict: Dict, window: int = 50) -> None:
+
+def plot_success(results_dict: Dict, window: int = 50, save_path: Optional[str] = None) -> None:
     plt.figure(figsize=(10, 4))
     
     for name, data in results_dict.items():
@@ -1248,9 +1226,14 @@ def plot_success(results_dict: Dict, window: int = 50) -> None:
     plt.ylabel("Success (0..1)")
     plt.legend()
     plt.grid(True, alpha=0.3)
+
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Success plot saved to {save_path}")
+
     plt.show()
 
-def plot_rewards(results_dict: Dict, window: int = 50) -> None:
+def plot_rewards(results_dict: Dict, window: int = 50, save_path: Optional[str] = None) -> None:
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     
     # plot 1: rewards
@@ -1286,6 +1269,10 @@ def plot_rewards(results_dict: Dict, window: int = 50) -> None:
     axes[1].legend()
     axes[1].grid(True, alpha=0.3)
     
+    if save_path:
+        plt.savefig(save_path)
+        print(f"Rewards plot saved to {save_path}")
+
     plt.tight_layout()
     plt.show()
 
@@ -1293,7 +1280,7 @@ def plot_rewards(results_dict: Dict, window: int = 50) -> None:
 # ====================== EXPERIMENT DRIVER BLOCK =====================
 
 # agents to test
-agents = {
+agents_to_test = {
     "Q-Learning": {
         "class": QLearningAgent,
         "params": {"lr": 0.6, "gamma": 0.95, "epsilon": 1.0},
@@ -1302,53 +1289,70 @@ agents = {
         "class": SARSAAgent,
         "params": {"lr": 0.4, "gamma": 0.99, "epsilon": 1.0},
     },
-    # "Monte Carlo": {
-    #     "class": MCAgent,
-    #     "params": {"lr": , "gamma": , "epsilon": },
-    # },
+    "Monte Carlo": {
+        "class": MCAgent,
+        "params": {"lr": 0.01, "gamma": 0.99, "epsilon": 1.0},
+    },
 }
 
-# test env 2:
-print("\n" + "="*50)
-print(" STARTING TEST ON ENV 2: RandomKeyMEnv_10")
-print("="*50)
+environments_to_test = {
+    "EmptyEnv": RandomEmptyEnv_10,
+    "KeyDoorEnv": RandomKeyMEnv_10,
+}
 
-results = {}
-env_cls = RandomKeyMEnv_10
+all_results = {}
 
-for agent_name, agent_cfg in agents.items():
-    agent_class = agent_cfg["class"]
-    agent_params = agent_cfg["params"]
+for env_name, env_class in environments_to_test.items():
+    print(f"\n{'='*25} STARTING EXPERIMENTS ON ENVIRONMENT: {env_name} {'='*25}")
+    results_for_env = {}
 
-    print(f"\nTraining {agent_name} in environment {env_cls}...")
-    
-    runner = ExperimentRunner(
-        env_class=env_cls,# todo: parameterize env class
-        agent_class=agent_class,
-        num_episodes=1000,          
-        max_steps=250,
-        reward_shaping_func=key_door_reward_shaping,
-        **agent_params  # lr, gamma, epsilon
-    )
+    for agent_name, agent_config in agents_to_test.items():
+        print(f"\n--- Training {agent_name} in {env_name} ---")
 
-    train_rewards_raw, train_rewards_shaped, train_steps, train_success, diagnostics = runner.train()
-    eval_metrics = runner.eval(num_episodes=200, use_shaping=False)
+        # reward shaing for key-door env
+        reward_func = key_door_reward_shaping_func if env_class == RandomKeyMEnv_10 else None
+        
+        # # todo: remove?
+        # max_steps = 100 if env_class == RandomEmptyEnv_10 else 250
 
-    results[agent_name] = {
-        "train_rewards_raw": train_rewards_raw,
-        "train_rewards_shaped": train_rewards_shaped,
-        "train_steps": train_steps,
-    }
+        runner = ExperimentRunner(
+            env_class=env_class,
+            agent_class=agent_config["class"],
+            num_episodes=1000,
+            # max_steps=max_steps, # todo
+            max_steps=250,
+            reward_shaping_func=reward_func,
+            **agent_config["params"]
+        )
 
-    # log eval metrics
-    metrics_str = ", ".join(f"{metric}: {val:.3f}" for metric, val in eval_metrics.items())
-    print(f"\n[{agent_name}] Evaluation Metrics: {metrics_str}")
-    
-    # cleanup
-    runner.close()
+        train_rewards_raw, train_rewards_shaped, train_steps, train_success, _ = runner.train()
+        eval_metrics = runner.eval(num_episodes=200, use_shaping=False)
 
-print("\nAll experiments complete.")
+        results_for_env[agent_name] = {
+            "train_rewards_raw": train_rewards_raw,
+            "train_rewards_shaped": train_rewards_shaped,
+            "train_steps": train_steps,
+            "train_success": train_success,
+            "eval_metrics": eval_metrics,
+        }
 
-# generate Plots
-plot_rewards(results)
-# plot_success(results)
+        metrics_str = ", ".join(f"{metric}: {val:.3f}" for metric, val in eval_metrics.items())
+        print(f"\n[{agent_name} on {env_name}] Evaluation Metrics: {metrics_str}")
+
+        runner.close()
+
+    all_results[env_name] = results_for_env
+
+    # generate plots for current env
+    print(f"\n--- Generating plots for {env_name} ---")
+    plot_rewards(results_for_env)
+    plot_success(results_for_env)
+
+print("\n\nAll experiments complete.")
+
+# # save full results to summary file
+# all_results_path = os.path.join(RESULTS_DIR, 'all_experiment_results.pkl')
+# with open(all_results_path, 'wb') as f:
+#     pickle.dump(all_results, f)
+# print(f"Full results dictionary saved to {all_results_path}")
+
